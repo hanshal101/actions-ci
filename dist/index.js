@@ -34560,6 +34560,7 @@ async function run() {
             "/tmp/roc-output",
             "--rotation-interval",
             "15",
+            "--debug",
         ];
 
         // Add additional arguments if provided
