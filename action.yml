@@ -1,0 +1,56 @@
+name: "ROC Network Analysis"
+description: "Run ROC deep packet inspection tool in a Docker container"
+author: "Hanshal"
+
+inputs:
+  server-url:
+    description: "License validation server URL"
+    required: true
+    default: "https://api.codexsecurity.io"
+  api-key:
+    description: "API key for authentication"
+    required: true
+  patterns:
+    description: "Path to YAML patterns file (relative to config dir)"
+    required: true
+    default: "pattern.yaml"
+  config-dir:
+    description: "Directory containing ROC config files"
+    required: false
+    default: "roc-config"
+  output-dir:
+    description: "Directory for ROC output files"
+    required: false
+    default: "roc-output"
+  docker-image:
+    description: "ROC Docker image to use"
+    required: false
+    default: "hanshal785/roc:v5"
+  additional-args:
+    description: "Additional arguments to pass to ROC"
+    required: false
+    default: ""
+  ssl-lib-path:
+    description: "Path to SSL library on host system"
+    required: false
+    default: "/lib/x86_64-linux-gnu"
+  ssl-lib-version:
+    description: "SSL library version (3 for libssl.so.3, 1.1 for libssl.so.1.1)"
+    required: false
+    default: "3"
+
+outputs:
+  container-id:
+    description: "ROC container ID"
+  output-files:
+    description: "List of generated output files"
+  logs:
+    description: "ROC container logs"
+
+runs:
+  using: "node20"
+  main: "dist/index.js"
+
+branding:
+  icon: "shield"
+  color: "blue"
