@@ -113,6 +113,8 @@ async function run() {
             `/tmp/roc-config/${patterns}`, // Use the actual filename
             "--watch",
             "/tmp/roc-output",
+            "--rotation-interval",
+            "15",
         ];
 
         // Add additional arguments if provided
@@ -153,56 +155,22 @@ async function run() {
         core.info("Waiting for ROC to initialize...");
         await sleep(10000); // Wait 10 seconds
 
-        // Perform the curl test to generate traffic that matches the pattern
-        core.info("Performing curl test to generate matching traffic...");
-        // Use a simple pattern like "1234" that should match the example format
-        const curlCommand = [
-            "curl",
-            "-X",
-            "POST",
-            "https://httpbin.org/post",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            `{"data": "This contains a simple number 1234 for testing"}`,
-            "--connect-timeout",
-            "10",
-            "--max-time",
-            "30",
-        ];
-
-        core.info(`Executing: curl ${curlCommand.slice(1).join(" ")}`);
-        const curlExitCode = await exec.exec("curl", curlCommand);
-
-        if (curlExitCode !== 0) {
-            core.warning(
-                `Curl command failed with exit code: ${curlExitCode}. This might be expected if the network is busy.`,
-            );
-        } else {
-            core.info("Curl test completed successfully.");
-        }
-
-        // Sleep for 1 minute to allow ROC to capture and process the traffic
-        core.info("Sleeping for 1 minute to allow ROC to process traffic...");
-        await sleep(60000); // Sleep for 1 minute (60000 milliseconds)
-
-        // Get output files after the sleep
+        // Get output files after initialization
         const outputFiles = await getOutputFiles(outputDir);
         core.setOutput("output-files", outputFiles);
         core.info(`Output files: ${outputFiles}`);
 
-        // Get logs after the sleep period
+        // Get initial logs (before traffic generation)
         const logs = await getContainerLogs(containerId);
         core.setOutput("logs", logs);
-        core.info(
-            "ROC container logs captured after traffic generation and processing period.",
-        );
+        core.info("ROC container logs captured after initialization.");
     } catch (error) {
         core.setFailed(error.message);
         core.error(error.stack);
     } finally {
-        // Always cleanup
-        await cleanupContainer();
+        // Always cleanup - note: this will happen after the workflow steps too
+        // We'll handle cleanup in the workflow instead to allow for post-action steps
+        // await cleanupContainer();
     }
 }
 
@@ -300,25 +268,22 @@ async function getContainerLogs(containerId) {
     }
 }
 
-async function cleanupContainer() {
-    try {
-        core.info("Cleaning up ROC container...");
-
-        // Stop container
-        await exec.exec("docker", ["stop", "roc-test"], {
-            ignoreReturnCode: true,
-        });
-
-        // Remove container
-        await exec.exec("docker", ["rm", "roc-test"], {
-            ignoreReturnCode: true,
-        });
-
-        core.info("Container cleanup completed");
-    } catch (error) {
-        core.warning(`Cleanup error: ${error.message}`);
-    }
-}
+// Note: We remove the automatic cleanup from the action itself
+// Cleanup will be handled in the workflow after post-action steps
+// async function cleanupContainer() {
+//     try {
+//         core.info("Cleaning up ROC container...");
+//         await exec.exec("docker", ["stop", "roc-test"], {
+//             ignoreReturnCode: true,
+//         });
+//         await exec.exec("docker", ["rm", "roc-test"], {
+//             ignoreReturnCode: true,
+//         });
+//         core.info("Container cleanup completed");
+//     } catch (error) {
+//         core.warning(`Cleanup error: ${error.message}`);
+//     }
+// }
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
