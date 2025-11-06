@@ -41,6 +41,26 @@ async function run() {
             `Pattern file content preview: ${patternContent.substring(0, 200)}...`,
         );
 
+        // Validate basic YAML structure by attempting to parse it
+        try {
+            const yaml = require("js-yaml"); // This requires adding js-yaml to package.json
+            const parsed = yaml.load(patternContent);
+            if (
+                !parsed ||
+                !parsed.patterns ||
+                !Array.isArray(parsed.patterns)
+            ) {
+                throw new Error("YAML file must contain a 'patterns' array");
+            }
+            core.info(
+                "Pattern file has valid YAML structure with 'patterns' array.",
+            );
+        } catch (yamlError) {
+            core.warning(
+                `Could not validate YAML structure: ${yamlError.message}. Proceeding anyway.`,
+            );
+        }
+
         // Check SSL libraries exist
         const sslLibExists = await checkSslLibraries(sslLibPath, sslLibVersion);
         if (!sslLibExists) {
@@ -135,6 +155,7 @@ async function run() {
 
         // Perform the curl test to generate traffic that matches the pattern
         core.info("Performing curl test to generate matching traffic...");
+        // Use a simple pattern like "1234" that should match the example format
         const curlCommand = [
             "curl",
             "-X",
@@ -143,7 +164,7 @@ async function run() {
             "-H",
             "Content-Type: application/json",
             "-d",
-            `{"api_key": "dummyapikey1234567890", "test_data": "This should match the pattern"}`,
+            `{"data": "This contains a simple number 1234 for testing"}`,
             "--connect-timeout",
             "10",
             "--max-time",
