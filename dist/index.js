@@ -30340,7 +30340,6 @@ const core = __nccwpck_require__(7484);
 const exec = __nccwpck_require__(5236);
 const fs = __nccwpck_require__(2136);
 const path = __nccwpck_require__(6928);
-// const yaml = require('js-yaml'); // Removed: Not needed if we don't generate defaults
 
 async function run() {
     try {
@@ -30433,59 +30432,14 @@ async function run() {
             return;
         }
 
-        // Give the container some time to start up
+        // Give the container some time to start up before the workflow proceeds
         await new Promise((resolve) => setTimeout(resolve, 20000)); // Sleep for 20 seconds
 
-        // --- Simulate Traffic (Optional Step within Action) ---
-        core.info("Simulating network traffic...");
-        const simulateCmd = [
-            "docker",
-            "exec",
-            containerName,
-            "sh",
-            "-c",
-            'find / -name "libssl.so*" 2>/dev/null; ldd $(which curl); echo "Generating curl traffic..."; curl -s https://example.com > /dev/null || true; curl -s -X POST "https://httpbin.org/post?test=12345667788764" -H "Content-Type: application/json" -d \'{"data":"12345667788764"}\' > /dev/null || true',
-        ];
-        await exec.exec(simulateCmd[0], simulateCmd.slice(1));
-        await new Promise((resolve) => setTimeout(resolve, 20000)); // Wait after traffic
-
-        // --- Print Container Logs ---
-        core.info("Fetching ROC container logs...");
-        await exec.exec("docker", ["logs", containerName]);
-
-        // --- More Simulated Traffic ---
-        core.info("Simulating more network traffic...");
-        const moreTrafficCmd = [
-            "docker",
-            "exec",
-            containerName,
-            "sh",
-            "-c",
-            'curl -X POST "https://example.com?more=12345667788764" -H "Content-Type: application/json" -d \'{"info":"12345667788764"}\' > /dev/null || true',
-        ];
-        await exec.exec(moreTrafficCmd[0], moreTrafficCmd.slice(1));
-        await new Promise((resolve) => setTimeout(resolve, 20000)); // Wait after traffic
-
-        // --- Print Container Logs Again ---
-        core.info("Fetching ROC container logs again...");
-        await exec.exec("docker", ["logs", containerName]);
-
-        // --- Print Output Files (if any) ---
-        core.info("Checking for output files in host output directory...");
-        const outputFiles = await fs.readdir(hostOutputDir);
-        if (outputFiles.length > 0) {
-            for (const file of outputFiles) {
-                const filePath = path.join(hostOutputDir, file);
-                core.info(`Contents of ${filePath}:`);
-                const content = await fs.readFile(filePath, "utf8");
-                console.log(content); // Use console.log for raw output
-            }
-        } else {
-            core.info("No output files found in the host output directory.");
-        }
-
-        // --- Store Container Name for Later Cleanup (if needed) ---
+        // --- Store Container Name for Later Steps (like curl, logs, cleanup) ---
         core.setOutput("container_name", containerName);
+        core.info(
+            `Container '${containerName}' started and ready for external interaction.`,
+        );
     } catch (error) {
         core.setFailed(error.message);
     }
