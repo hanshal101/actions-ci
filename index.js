@@ -1,97 +1,62 @@
+// index.js
 const core = require("@actions/core");
 const exec = require("@actions/exec");
-const io = require("@actions/io");
 const fs = require("fs-extra");
 const path = require("path");
+// const yaml = require('js-yaml'); // Removed: Not needed if we don't generate defaults
 
 async function run() {
     try {
-        // Get inputs
-        const serverUrl = core.getInput("server-url", { required: true });
-        const apiKey = core.getInput("api-key", { required: true });
-        const patterns = core.getInput("patterns", { required: true });
-        const configDir = core.getInput("config-dir") || "roc-config";
-        const outputDir = core.getInput("output-dir") || "roc-output";
-        const dockerImage =
-            core.getInput("docker-image") || "hanshal785/roc:v5";
-        const additionalArgs = core.getInput("additional-args") || "";
-        const sslLibPath =
-            core.getInput("ssl-lib-path") || "/lib/x86_64-linux-gnu";
-        const sslLibVersion = core.getInput("ssl-lib-version") || "3";
+        // --- Input Parameters ---
+        // Get the patterns YAML content directly from the user's workflow input
+        const patternsYamlContent = core.getInput("patterns_yaml", {
+            required: true,
+        });
+        const dockerImage = core.getInput("docker_image", { required: true });
+        const serverUrl = core.getInput("server_url", { required: true });
+        const apiKey = core.getInput("api_key", { required: true });
+        // Define the standard paths inside the container
+        const patternsFileInsideContainer = "/tmp/roc-config/pattern.yaml";
+        const watchDirInsideContainer = "/tmp/roc-output";
+        const containerName =
+            core.getInput("container_name", { required: false }) ||
+            "roc-action-container";
+        const outputDirHostPath =
+            core.getInput("output_dir_host_path", { required: false }) ||
+            "./roc-action-output";
+        const extraDockerArgs =
+            core.getInput("extra_docker_args", { required: false }) || "";
 
-        core.info("ROC GitHub Action started");
-        core.info(`Server URL: ${serverUrl}`);
-        core.info(`Config directory: ${configDir}`);
-        core.info(`Pattern file: ${patterns}`);
-        core.info(`Output directory: ${outputDir}`);
+        const workspace = process.env.GITHUB_WORKSPACE;
 
-        // Validate pattern file exists
-        const patternFilePath = path.join(
-            process.env.GITHUB_WORKSPACE || ".",
-            configDir,
-            patterns,
-        );
-        if (!fs.existsSync(patternFilePath)) {
-            throw new Error(`Pattern file does not exist: ${patternFilePath}`);
-        }
+        // --- Setup Directories and Config on Host ---
+        const hostConfigDir = path.join(workspace, "roc-config-action");
+        const hostOutputDir = path.join(
+            workspace,
+            outputDirHostPath.replace("./", ""),
+        ); // Resolve relative path
 
-        core.info(`Pattern file found: ${patternFilePath}`);
-        const patternContent = fs.readFileSync(patternFilePath, "utf8");
+        await fs.ensureDir(hostConfigDir);
+        await fs.ensureDir(hostOutputDir);
+
+        core.info(`Host Config Dir: ${hostConfigDir}`);
+        core.info(`Host Output Dir: ${hostOutputDir}`);
+
+        // Write the user-provided YAML content to the host config directory
+        // The file name must match what the ROC container expects when you pass --patterns
+        const hostPatternFilePath = path.join(hostConfigDir, "pattern.yaml");
+        await fs.writeFile(hostPatternFilePath, patternsYamlContent);
         core.info(
-            `Pattern file content preview: ${patternContent.substring(0, 200)}...`,
+            `User-provided patterns file written to: ${hostPatternFilePath}`,
         );
 
-        // Validate basic YAML structure by attempting to parse it
-        try {
-            const yaml = require("js-yaml"); // This requires adding js-yaml to package.json
-            const parsed = yaml.load(patternContent);
-            if (
-                !parsed ||
-                !parsed.patterns ||
-                !Array.isArray(parsed.patterns)
-            ) {
-                throw new Error("YAML file must contain a 'patterns' array");
-            }
-            core.info(
-                "Pattern file has valid YAML structure with 'patterns' array.",
-            );
-        } catch (yamlError) {
-            core.warning(
-                `Could not validate YAML structure: ${yamlError.message}. Proceeding anyway.`,
-            );
-        }
-
-        // Check SSL libraries exist
-        const sslLibExists = await checkSslLibraries(sslLibPath, sslLibVersion);
-        if (!sslLibExists) {
-            core.warning(
-                `SSL libraries not found at ${sslLibPath}. ROC may fail to start.`,
-            );
-        } else {
-            core.info(`SSL libraries found at: ${sslLibPath}`);
-        }
-
-        // Create directories
-        await fs.ensureDir(outputDir);
-        await fs.ensureDir(configDir);
-
-        // Build SSL arguments
-        let sslArgs = [];
-        if (sslLibExists) {
-            sslArgs = [
-                `-v`,
-                `${sslLibPath}/libssl.so.${sslLibVersion}:/usr/lib64/libssl.so.${sslLibVersion}`,
-                `-v`,
-                `${sslLibPath}/libcrypto.so.${sslLibVersion}:/usr/lib64/libcrypto.so.${sslLibVersion}`,
-            ];
-        }
-
-        // Build docker command - use the actual filename provided
-        const dockerArgs = [
+        // --- Run Docker Container ---
+        const dockerRunCmd = [
+            "docker",
             "run",
             "-d",
             "--name",
-            "roc-test",
+            containerName,
             "--privileged",
             "--pid=host",
             "--network=host",
@@ -99,196 +64,94 @@ async function run() {
             "/proc:/proc",
             "-v",
             "/sys:/sys",
-            ...sslArgs,
             "-v",
-            `${process.env.GITHUB_WORKSPACE || "."}/${outputDir}:/tmp/roc-output`,
+            "/lib/x86_64-linux-gnu/libssl.so.3:/usr/lib64/libssl.so.3",
             "-v",
-            `${process.env.GITHUB_WORKSPACE || "."}/${configDir}:/tmp/roc-config:ro`,
+            "/lib/x86_64-linux-gnu/libcrypto.so.3:/usr/lib64/libcrypto.so.3",
+            "-v",
+            `${hostOutputDir}:/tmp/roc-output`, // Map host output dir to container's /tmp/roc-output
+            "-v",
+            `${hostConfigDir}:/tmp/roc-config:ro`, // Map host config dir to container's /tmp/roc-config
+            ...extraDockerArgs.split(" "), // Add any extra arguments
             dockerImage,
             "--server-url",
             serverUrl,
             "--api-key",
             apiKey,
             "--patterns",
-            `/tmp/roc-config/${patterns}`, // Use the actual filename
+            patternsFileInsideContainer, // Use the standard path inside the container
             "--watch",
-            "/tmp/roc-output",
-            "--rotation-interval",
-            "15",
-            "--debug",
-        ];
+            watchDirInsideContainer, // Use the standard path inside the container
+        ].filter((arg) => arg !== ""); // Remove empty strings from split
 
-        // Add additional arguments if provided
-        if (additionalArgs.trim()) {
-            dockerArgs.push(...additionalArgs.trim().split(" "));
-        }
-
-        core.info("Starting ROC container...");
-        core.info(`Docker command: docker ${dockerArgs.join(" ")}`);
-
-        // Run the container
-        const exitCode = await exec.exec("docker", dockerArgs);
-
-        if (exitCode !== 0) {
-            throw new Error(
-                `Failed to start ROC container. Exit code: ${exitCode}`,
+        core.info(`Running Docker command: ${dockerRunCmd.join(" ")}`);
+        const dockerRunExitCode = await exec.exec(
+            dockerRunCmd[0],
+            dockerRunCmd.slice(1),
+        );
+        if (dockerRunExitCode !== 0) {
+            core.setFailed(
+                `Docker run failed with exit code ${dockerRunExitCode}`,
             );
+            return;
         }
 
-        // Get container ID
-        let containerId = "";
-        await exec.exec("docker", ["ps", "-q", "--filter", "name=roc-test"], {
-            listeners: {
-                stdout: (data) => {
-                    containerId += data.toString();
-                },
-            },
-        });
+        // Give the container some time to start up
+        await new Promise((resolve) => setTimeout(resolve, 20000)); // Sleep for 20 seconds
 
-        containerId = containerId.trim();
-        core.setOutput("container-id", containerId);
-        core.info(`ROC container started with ID: ${containerId}`);
+        // --- Simulate Traffic (Optional Step within Action) ---
+        core.info("Simulating network traffic...");
+        const simulateCmd = [
+            "docker",
+            "exec",
+            containerName,
+            "sh",
+            "-c",
+            'find / -name "libssl.so*" 2>/dev/null; ldd $(which curl); echo "Generating curl traffic..."; curl -s https://example.com > /dev/null || true; curl -s -X POST "https://httpbin.org/post?test=12345667788764" -H "Content-Type: application/json" -d \'{"data":"12345667788764"}\' > /dev/null || true',
+        ];
+        await exec.exec(simulateCmd[0], simulateCmd.slice(1));
+        await new Promise((resolve) => setTimeout(resolve, 20000)); // Wait after traffic
 
-        // Monitor container status to ensure it's running before proceeding
-        await monitorContainer(containerId);
+        // --- Print Container Logs ---
+        core.info("Fetching ROC container logs...");
+        await exec.exec("docker", ["logs", containerName]);
 
-        // Wait a bit more to ensure ROC is fully initialized
-        core.info("Waiting for ROC to initialize...");
-        await sleep(10000); // Wait 10 seconds
+        // --- More Simulated Traffic ---
+        core.info("Simulating more network traffic...");
+        const moreTrafficCmd = [
+            "docker",
+            "exec",
+            containerName,
+            "sh",
+            "-c",
+            'curl -X POST "https://example.com?more=12345667788764" -H "Content-Type: application/json" -d \'{"info":"12345667788764"}\' > /dev/null || true',
+        ];
+        await exec.exec(moreTrafficCmd[0], moreTrafficCmd.slice(1));
+        await new Promise((resolve) => setTimeout(resolve, 20000)); // Wait after traffic
 
-        // Get output files after initialization
-        const outputFiles = await getOutputFiles(outputDir);
-        core.setOutput("output-files", outputFiles);
-        core.info(`Output files: ${outputFiles}`);
+        // --- Print Container Logs Again ---
+        core.info("Fetching ROC container logs again...");
+        await exec.exec("docker", ["logs", containerName]);
 
-        // Get initial logs (before traffic generation)
-        const logs = await getContainerLogs(containerId);
-        core.setOutput("logs", logs);
-        core.info("ROC container logs captured after initialization.");
+        // --- Print Output Files (if any) ---
+        core.info("Checking for output files in host output directory...");
+        const outputFiles = await fs.readdir(hostOutputDir);
+        if (outputFiles.length > 0) {
+            for (const file of outputFiles) {
+                const filePath = path.join(hostOutputDir, file);
+                core.info(`Contents of ${filePath}:`);
+                const content = await fs.readFile(filePath, "utf8");
+                console.log(content); // Use console.log for raw output
+            }
+        } else {
+            core.info("No output files found in the host output directory.");
+        }
+
+        // --- Store Container Name for Later Cleanup (if needed) ---
+        core.setOutput("container_name", containerName);
     } catch (error) {
         core.setFailed(error.message);
-        core.error(error.stack);
-    } finally {
-        // Always cleanup - note: this will happen after the workflow steps too
-        // We'll handle cleanup in the workflow instead to allow for post-action steps
-        // await cleanupContainer();
     }
 }
 
-async function checkSslLibraries(sslLibPath, sslLibVersion) {
-    try {
-        const sslPath = path.join(sslLibPath, `libssl.so.${sslLibVersion}`);
-        const cryptoPath = path.join(
-            sslLibPath,
-            `libcrypto.so.${sslLibVersion}`,
-        );
-
-        const sslExists = await fs.pathExists(sslPath);
-        const cryptoExists = await fs.pathExists(cryptoPath);
-
-        if (sslExists && cryptoExists) {
-            core.info(`Found SSL libraries: ${sslPath}, ${cryptoPath}`);
-            return true;
-        }
-
-        core.warning(`SSL libraries not found: ${sslPath}, ${cryptoPath}`);
-        return false;
-    } catch (error) {
-        core.warning(`Error checking SSL libraries: ${error.message}`);
-        return false;
-    }
-}
-
-async function monitorContainer(containerId) {
-    core.info("Monitoring ROC container...");
-
-    // Check container status periodically
-    for (let i = 0; i < 30; i++) {
-        // Check for 5 minutes (30 * 10 seconds)
-        let status = "";
-        try {
-            await exec.exec(
-                "docker",
-                ["inspect", "--format", "{{.State.Status}}", containerId],
-                {
-                    listeners: {
-                        stdout: (data) => {
-                            status += data.toString().trim();
-                        },
-                    },
-                },
-            );
-
-            if (status === "running") {
-                core.info("ROC container is running");
-                break;
-            } else if (status === "exited") {
-                core.warning("ROC container has exited");
-                break;
-            }
-
-            core.info(`Container status: ${status}, waiting...`);
-            await sleep(10000); // Wait 10 seconds
-        } catch (error) {
-            core.warning(`Could not inspect container: ${error.message}`);
-            break;
-        }
-    }
-
-    // Show current logs
-    await exec.exec("docker", ["logs", containerId]);
-}
-
-async function getOutputFiles(outputDir) {
-    try {
-        const files = await fs.readdir(outputDir);
-        return files.join("\n");
-    } catch (error) {
-        core.warning(`Could not read output directory: ${error.message}`);
-        return "";
-    }
-}
-
-async function getContainerLogs(containerId) {
-    try {
-        let logs = "";
-        await exec.exec("docker", ["logs", containerId], {
-            listeners: {
-                stdout: (data) => {
-                    logs += data.toString();
-                },
-                stderr: (data) => {
-                    logs += data.toString();
-                },
-            },
-        });
-        return logs;
-    } catch (error) {
-        core.warning(`Could not get container logs: ${error.message}`);
-        return "";
-    }
-}
-
-// Note: We remove the automatic cleanup from the action itself
-// Cleanup will be handled in the workflow after post-action steps
-// async function cleanupContainer() {
-//     try {
-//         core.info("Cleaning up ROC container...");
-//         await exec.exec("docker", ["stop", "roc-test"], {
-//             ignoreReturnCode: true,
-//         });
-//         await exec.exec("docker", ["rm", "roc-test"], {
-//             ignoreReturnCode: true,
-//         });
-//         core.info("Container cleanup completed");
-//     } catch (error) {
-//         core.warning(`Cleanup error: ${error.message}`);
-//     }
-// }
-
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Run the action
 run();
