@@ -14,9 +14,21 @@ async function run() {
         const dockerImage = core.getInput("docker_image", { required: true });
         const serverUrl = core.getInput("server_url", { required: true });
         const apiKey = core.getInput("api_key", { required: true });
-        // Define the standard paths inside the container
+
+        // Define the standard paths inside the container (fixed)
         const patternsFileInsideContainer = "/tmp/roc-config/pattern.yaml";
         const watchDirInsideContainer = "/tmp/roc-output";
+        const libsslContainerPath = "/usr/lib64/libssl.so.3"; // Fixed path inside container
+        const libcryptoContainerPath = "/usr/lib64/libcrypto.so.3"; // Fixed path inside container
+
+        // Get configurable host paths for libraries
+        const libsslHostPath =
+            core.getInput("libssl_host_path", { required: false }) ||
+            "/lib/x86_64-linux-gnu/libssl.so.3";
+        const libcryptoHostPath =
+            core.getInput("libcrypto_host_path", { required: false }) ||
+            "/lib/x86_64-linux-gnu/libcrypto.so.3";
+
         const containerName =
             core.getInput("container_name", { required: false }) ||
             "roc-action-container";
@@ -64,9 +76,9 @@ async function run() {
             "-v",
             "/sys:/sys",
             "-v",
-            "/lib/x86_64-linux-gnu/libssl.so.3:/usr/lib64/libssl.so.3",
+            `${libsslHostPath}:${libsslContainerPath}`, // Use configurable host path
             "-v",
-            "/lib/x86_64-linux-gnu/libcrypto.so.3:/usr/lib64/libcrypto.so.3",
+            `${libcryptoHostPath}:${libcryptoContainerPath}`, // Use configurable host path
             "-v",
             `${hostOutputDir}:/tmp/roc-output`, // Map host output dir to container's /tmp/roc-output
             "-v",

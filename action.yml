@@ -14,6 +14,14 @@ inputs:
     api_key:
         description: "The API key for ROC"
         required: true
+    libssl_host_path:
+        description: "Path on the host for libssl.so.3 (default: /lib/x86_64-linux-gnu/libssl.so.3)"
+        required: false
+        default: "/lib/x86_64-linux-gnu/libssl.so.3"
+    libcrypto_host_path:
+        description: "Path on the host for libcrypto.so.3 (default: /lib/x86_64-linux-gnu/libcrypto.so.3)"
+        required: false
+        default: "/lib/x86_64-linux-gnu/libcrypto.so.3"
     container_name:
         description: "Name for the Docker container (default: roc-action-container)"
         required: false
